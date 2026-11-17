@@ -1,122 +1,127 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
+import { useEffect, useState } from 'react'
+import type { User } from './types'
+import { getUsers } from './services/api'
+import { UserList } from './components/UserList'
 import './App.css'
 
-function App() {
-  const [count, setCount] = useState(0)
+export default function App() {
+  const [users, setUsers] = useState<User[]>([])
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null)
+  const [isLoading, setIsLoading] = useState<boolean>(true)
+  const [error, setError] = useState<string | null>(null)
+  const [retryKey, setRetryKey] = useState<number>(0)
+
+  useEffect(() => {
+    const controller = new AbortController()
+
+    getUsers(controller.signal)
+      .then((data) => {
+        setUsers(data)
+        setError(null)
+      })
+      .catch((err: unknown) => {
+        if (err instanceof Error && err.name === 'AbortError') {
+          return
+        }
+        const message =
+          err instanceof Error
+            ? err.message
+            : 'Ocurrió un error inesperado al cargar los usuarios'
+        setError(message)
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setIsLoading(false)
+        }
+      })
+
+    return () => {
+      controller.abort()
+    }
+  }, [retryKey])
+
+  const handleRetry = () => {
+    setIsLoading(true)
+    setError(null)
+    setRetryKey((prev) => prev + 1)
+  }
+
+  const handleSelectUser = (user: User) => {
+    setSelectedUserId(user.id)
+  }
+
+  const selectedUser = users.find((user) => user.id === selectedUserId) ?? null
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    <div className="app-layout-wrapper">
+      <header className="app-header">
+        <h1 className="app-title">Directorio de Usuarios</h1>
+        <p className="app-subtitle">
+          Selecciona un usuario para explorar sus publicaciones
+        </p>
+      </header>
 
-      <div className="ticks"></div>
+      <main className="app-main">
+        <div className="app-two-column-layout">
+          <section
+            className="app-column app-column-sidebar"
+            aria-label="Panel de usuarios"
+          >
+            <UserList
+              users={users}
+              selectedUserId={selectedUserId}
+              onSelectUser={handleSelectUser}
+              isLoading={isLoading}
+              error={error}
+              onRetry={handleRetry}
+            />
+          </section>
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
+          <section
+            className="app-column app-column-detail"
+            aria-label="Panel de detalle"
+          >
+            <div className="detail-panel">
+              {selectedUser ? (
+                <article className="user-detail-card">
+                  <header className="detail-header">
+                    <div className="detail-avatar" aria-hidden="true">
+                      {selectedUser.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <h2 className="detail-name">{selectedUser.name}</h2>
+                      <p className="detail-handle">@{selectedUser.username}</p>
+                    </div>
+                  </header>
+                  <div className="detail-body">
+                    <p className="detail-email">
+                      <span className="detail-label">Email:</span>{' '}
+                      <a href={`mailto:${selectedUser.email}`}>{selectedUser.email}</a>
+                    </p>
+                    <div className="posts-placeholder-notice">
+                      <p>
+                        El panel de publicaciones y creación de posts se integrará
+                        en el siguiente paso.
+                      </p>
+                    </div>
+                  </div>
+                </article>
+              ) : (
+                <div className="detail-empty-placeholder">
+                  <div className="placeholder-icon" aria-hidden="true">
+                    👤
+                  </div>
+                  <h2>Ningún usuario seleccionado</h2>
+                  <p>
+                    Elige un usuario de la lista izquierda para ver su perfil y sus
+                    publicaciones asociadas.
+                  </p>
+                </div>
+              )}
+            </div>
+          </section>
         </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+      </main>
+    </div>
   )
 }
-
-export default App

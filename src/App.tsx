@@ -1,23 +1,33 @@
 import { useEffect, useState } from 'react'
-import type { User } from './types'
-import { getUsers } from './services/api'
+import type { Post, User } from './types'
+import { getPostsByUser, getUsers } from './services/api'
 import { UserList } from './components/UserList'
+import { PostList } from './components/PostList'
 import './App.css'
 
 export default function App() {
   const [users, setUsers] = useState<User[]>([])
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null)
-  const [isLoading, setIsLoading] = useState<boolean>(true)
-  const [error, setError] = useState<string | null>(null)
-  const [retryKey, setRetryKey] = useState<number>(0)
+  const [isLoadingUsers, setIsLoadingUsers] = useState<boolean>(true)
+  const [usersError, setUsersError] = useState<string | null>(null)
+  const [usersRetryKey, setUsersRetryKey] = useState<number>(0)
 
+  // Publicaciones obtenidas de la API para el usuario seleccionado
+  const [apiPosts, setApiPosts] = useState<Post[]>([])
+  // Publicaciones creadas en memoria durante la sesión organizadas por userId
+  const [createdPostsByUser, setCreatedPostsByUser] = useState<Record<number, Post[]>>({})
+  const [isPostsLoading, setIsPostsLoading] = useState<boolean>(false)
+  const [postsError, setPostsError] = useState<string | null>(null)
+  const [postsRetryKey, setPostsRetryKey] = useState<number>(0)
+
+  // Carga inicial y reintento de usuarios
   useEffect(() => {
     const controller = new AbortController()
 
     getUsers(controller.signal)
       .then((data) => {
         setUsers(data)
-        setError(null)
+        setUsersError(null)
       })
       .catch((err: unknown) => {
         if (err instanceof Error && err.name === 'AbortError') {
@@ -27,37 +37,102 @@ export default function App() {
           err instanceof Error
             ? err.message
             : 'Ocurrió un error inesperado al cargar los usuarios'
-        setError(message)
+        setUsersError(message)
       })
       .finally(() => {
         if (!controller.signal.aborted) {
-          setIsLoading(false)
+          setIsLoadingUsers(false)
         }
       })
 
     return () => {
       controller.abort()
     }
-  }, [retryKey])
+  }, [usersRetryKey])
 
-  const handleRetry = () => {
-    setIsLoading(true)
-    setError(null)
-    setRetryKey((prev) => prev + 1)
+  // Carga de publicaciones por usuario seleccionado con cancelación reactiva
+  useEffect(() => {
+    if (selectedUserId === null) {
+      return
+    }
+
+    const controller = new AbortController()
+
+    getPostsByUser(selectedUserId, controller.signal)
+      .then((data) => {
+        setApiPosts(data)
+        setPostsError(null)
+      })
+      .catch((err: unknown) => {
+        if (err instanceof Error && err.name === 'AbortError') {
+          return
+        }
+        const message =
+          err instanceof Error
+            ? err.message
+            : 'Ocurrió un error al cargar las publicaciones del usuario'
+        setPostsError(message)
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setIsPostsLoading(false)
+        }
+      })
+
+    return () => {
+      controller.abort()
+    }
+  }, [selectedUserId, postsRetryKey])
+
+  const handleRetryUsers = () => {
+    setIsLoadingUsers(true)
+    setUsersError(null)
+    setUsersRetryKey((prev) => prev + 1)
   }
 
   const handleSelectUser = (user: User) => {
+    if (selectedUserId === user.id) {
+      return
+    }
     setSelectedUserId(user.id)
+    setApiPosts([])
+    setIsPostsLoading(true)
+    setPostsError(null)
+  }
+
+  const handleRetryPosts = () => {
+    setIsPostsLoading(true)
+    setPostsError(null)
+    setPostsRetryKey((prev) => prev + 1)
+  }
+
+  const handlePostCreated = (newPost: Post) => {
+    if (!selectedUserId) {
+      return
+    }
+    const postWithUniqueId: Post = {
+      ...newPost,
+      id: Date.now(),
+    }
+    setCreatedPostsByUser((prev) => ({
+      ...prev,
+      [selectedUserId]: [postWithUniqueId, ...(prev[selectedUserId] ?? [])],
+    }))
   }
 
   const selectedUser = users.find((user) => user.id === selectedUserId) ?? null
 
+  // Combina los posts creados localmente para selectedUserId delante de los posts de la API
+  const localPosts =
+    selectedUserId !== null ? createdPostsByUser[selectedUserId] ?? [] : []
+  const displayedPosts = [...localPosts, ...apiPosts]
+
   return (
     <div className="app-layout-wrapper">
       <header className="app-header">
-        <h1 className="app-title">Directorio de Usuarios</h1>
+        <h1 className="app-title">Directorio de Usuarios y Publicaciones</h1>
         <p className="app-subtitle">
-          Selecciona un usuario para explorar sus publicaciones
+          Explora los usuarios, consulta sus publicaciones y crea nuevo contenido
         </p>
       </header>
 
@@ -65,15 +140,15 @@ export default function App() {
         <div className="app-two-column-layout">
           <section
             className="app-column app-column-sidebar"
-            aria-label="Panel de usuarios"
+            aria-label="Sección de usuarios"
           >
             <UserList
               users={users}
               selectedUserId={selectedUserId}
               onSelectUser={handleSelectUser}
-              isLoading={isLoading}
-              error={error}
-              onRetry={handleRetry}
+              isLoading={isLoadingUsers}
+              error={usersError}
+              onRetry={handleRetryUsers}
             />
           </section>
 
@@ -82,42 +157,14 @@ export default function App() {
             aria-label="Panel de detalle"
           >
             <div className="detail-panel">
-              {selectedUser ? (
-                <article className="user-detail-card">
-                  <header className="detail-header">
-                    <div className="detail-avatar" aria-hidden="true">
-                      {selectedUser.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div>
-                      <h2 className="detail-name">{selectedUser.name}</h2>
-                      <p className="detail-handle">@{selectedUser.username}</p>
-                    </div>
-                  </header>
-                  <div className="detail-body">
-                    <p className="detail-email">
-                      <span className="detail-label">Email:</span>{' '}
-                      <a href={`mailto:${selectedUser.email}`}>{selectedUser.email}</a>
-                    </p>
-                    <div className="posts-placeholder-notice">
-                      <p>
-                        El panel de publicaciones y creación de posts se integrará
-                        en el siguiente paso.
-                      </p>
-                    </div>
-                  </div>
-                </article>
-              ) : (
-                <div className="detail-empty-placeholder">
-                  <div className="placeholder-icon" aria-hidden="true">
-                    👤
-                  </div>
-                  <h2>Ningún usuario seleccionado</h2>
-                  <p>
-                    Elige un usuario de la lista izquierda para ver su perfil y sus
-                    publicaciones asociadas.
-                  </p>
-                </div>
-              )}
+              <PostList
+                user={selectedUser}
+                posts={displayedPosts}
+                isLoading={isPostsLoading}
+                error={postsError}
+                onRetry={handleRetryPosts}
+                onPostCreated={handlePostCreated}
+              />
             </div>
           </section>
         </div>
